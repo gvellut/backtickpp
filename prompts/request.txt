@@ -1,0 +1,7 @@
+v1
+
+The extension will be called backtick-plus-plus.
+On the VSCode side, the UI will be the same as for workbench.action.quickSwitchWindow :
+- on the shortcut pressed, a list of ordered windows for VSCode will open.
+
+It will need to have a shortcut
