@@ -1,8 +1,43 @@
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
+import { execSync } from 'child_process';
+
+let vscodeAPI: typeof vscode;
+
+try {
+    vscodeAPI = require('vscode');
+} catch (e) {
+    console.log('Running outside of VS Code, using mock vscode API');
+    vscodeAPI = {
+        window: {
+            showInformationMessage: (message: string) => { console.log(`INFO: ${message}`); return Promise.resolve(undefined); },
+            showErrorMessage: (message: string) => { console.error(`ERROR: ${message}`); return Promise.resolve(undefined); },
+            createQuickPick: () => ({
+                items: [],
+                activeItems: [],
+                placeholder: '',
+                canSelectMany: false,
+                onDidAccept: () => ({ dispose: () => { } }),
+                onDidChangeActive: () => ({ dispose: () => { } }),
+                onDidHide: () => ({ dispose: () => { } }),
+                show: () => { },
+                hide: () => { },
+                dispose: () => { },
+            } as any),
+        },
+        workspace: {
+            getConfiguration: () => ({
+                get: (key: string, defaultValue: any) => defaultValue,
+            } as any),
+        },
+        commands: {
+            registerCommand: () => ({ dispose: () => { } }),
+        },
+    } as any;
+}
 
 // MARK: - Interfaces
 
@@ -18,9 +53,14 @@ export interface StatusResponse {
 
 // MARK: - Helper Process
 
-class HelperProcess {
+export class HelperProcess {
     private static readonly SOCKET_PATH = '/tmp/backtick-plus-plus-helper.sock';
     private helperProcess: ChildProcess | null = null;
+    private vscode: typeof vscodeAPI | undefined;
+
+    constructor(vscodeInstance?: typeof vscodeAPI) {
+        this.vscode = vscodeInstance;
+    }
 
     async start(): Promise<void> {
         // Kill any existing helper processes
@@ -32,14 +72,18 @@ class HelperProcess {
             throw new Error('Helper binary not found. Please build the Swift helper first.');
         }
 
+        console.log('Spawning helper process...');
         this.helperProcess = spawn(helperPath, [], {
-            detached: true,
+            detached: false, // Tie helper lifecycle to the extension
             stdio: 'ignore'
         });
+        // this.helperProcess.unref(); // No longer needed with detached: false
 
         // Wait a moment for the helper to start
         await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
+    async checkStatusAndPermissions(): Promise<void> {
         // Check if helper is responding
         const status = await this.getStatus();
         if (!status.hasAccessibilityPermission) {
@@ -122,46 +166,79 @@ class HelperProcess {
         return null;
     }
 
+    /**
+     * Sends a command to the helper process socket using the synchronous `netcat` utility.
+     *
+     * This method uses `execSync` to call `nc` because the Swift server is highly responsive
+     * and closes the connection immediately after its first read. The standard async `net`
+     * module in Node.js can introduce a micro-delay, causing a race condition where the
+     * server closes the socket before the client can write to it, resulting in an EPIPE error.
+     * Using a blocking, synchronous tool like `netcat` ensures the connect-and-write operation
+     * is atomic and fast enough to succeed.
+     *
+     * @param command The command to send.
+     * @param data The data payload for the command.
+     * @returns A Promise that resolves with the server's response.
+     */
     private async sendCommand(command: string, data: string): Promise<string> {
         return new Promise((resolve, reject) => {
-            const client = net.createConnection(HelperProcess.SOCKET_PATH);
-            let response = '';
+            const socketPath = HelperProcess.SOCKET_PATH;
+            const message = data ? `${command}:${data}` : command;
 
-            client.on('connect', () => {
-                const message = data ? `${command}:${data}` : command;
-                client.write(message);
-            });
+            // --- CRITICAL SECURITY STEP: Sanitize input to prevent shell command injection ---
+            // This replaces every single quote with '\'' which is the safe way to embed a
+            // single quote within another single-quoted shell string.
+            const sanitizedMessage = message.replace(/'/g, "'\\''");
 
-            client.on('data', (chunk) => {
-                response += chunk.toString();
-            });
+            // The shell command to execute:
+            // 1. `echo '${sanitizedMessage}'`: Prints our sanitized message to standard output.
+            // 2. `|`: Pipes that output to the standard input of the next command.
+            // 3. `nc -U '${socketPath}'`: `netcat` connects to the specified Unix Domain Socket (`-U`)
+            //    and writes whatever it receives from its standard input.
+            const shellCommand = `echo '${sanitizedMessage}' | nc -U '${socketPath}'`;
 
-            client.on('end', () => {
+            try {
+                // `execSync` blocks until the shell command finishes. We wrap it in a Promise
+                // to maintain the async signature of the parent function.
+                const responseBuffer = execSync(shellCommand, {
+                    // Set a timeout for the entire operation to prevent indefinite hangs.
+                    timeout: 5000, // 5 seconds
+                    // Suppress stderr from appearing in the main console to handle errors gracefully.
+                    stdio: 'pipe'
+                });
+
+                // Convert the response buffer to a string and trim any trailing newline.
+                const response = responseBuffer.toString('utf8').trim();
+
                 if (response.startsWith('ERROR:')) {
                     reject(new Error(response.substring(6)));
                 } else {
                     resolve(response.startsWith('OK:') ? response.substring(3) : response);
                 }
-            });
 
-            client.on('error', (error) => {
-                reject(error);
-            });
-
-            // Timeout after 5 seconds
-            setTimeout(() => {
-                client.destroy();
-                reject(new Error('Command timeout'));
-            }, 5000);
+            } catch (error: any) {
+                // This block catches errors from execSync, such as:
+                //  - The `nc` command timing out.
+                //  - `nc` not being installed on the system.
+                //  - `nc` failing to connect (e.g., socket doesn't exist).
+                reject(new Error(`Socket communication failed: ${error.message}`));
+            }
         });
     }
 
     private async showPermissionDialog(): Promise<string | undefined> {
-        return vscode.window.showInformationMessage(
-            'Backtick++ needs Accessibility permissions to manage VS Code windows.',
-            'Request Permission',
-            'Cancel'
-        );
+        if (this.vscode && this.vscode.window) {
+            return this.vscode.window.showInformationMessage(
+                'Backtick++ needs Accessibility permissions to manage VS Code windows.',
+                'Request Permission',
+                'Cancel'
+            );
+        } else {
+            console.log('Backtick++ needs Accessibility permissions. Please grant them in System Settings.');
+            // For a CLI, we might not be able to programmatically ask.
+            // Let's assume 'Request Permission' for CLI testing purposes.
+            return 'Request Permission';
+        }
     }
 }
 
@@ -171,19 +248,24 @@ class WindowSwitcher {
     private quickPick: vscode.QuickPick<vscode.QuickPickItem> | null = null;
     private windows: WindowInfo[] = [];
     private currentIndex = 0;
+    private helperProcess: HelperProcess;
+    private vscode: typeof vscodeAPI;
 
-    constructor(private helperProcess: HelperProcess) { }
+    constructor(helperProcess: HelperProcess, vscodeInstance: typeof vscodeAPI) {
+        this.helperProcess = helperProcess;
+        this.vscode = vscodeInstance;
+    }
 
     async showSwitcher(direction: 'forward' | 'backward'): Promise<void> {
         try {
-            const config = vscode.workspace.getConfiguration('backtick-plus-plus');
+            const config = this.vscode.workspace.getConfiguration('backtick-plus-plus');
             const newWindowPosition = config.get<string>('newWindowPosition', 'top');
             const activationMode = config.get<string>('activationMode', 'automatic');
 
             this.windows = await this.helperProcess.getWindows(newWindowPosition, activationMode);
 
             if (this.windows.length <= 1) {
-                vscode.window.showInformationMessage('Only one VS Code window found');
+                this.vscode.window.showInformationMessage('Only one VS Code window found');
                 return;
             }
 
@@ -200,27 +282,27 @@ class WindowSwitcher {
 
             this.showQuickPick();
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to get windows: ${error.message}`);
+            this.vscode.window.showErrorMessage(`Failed to get windows: ${error.message}`);
         }
     }
 
     async instantSwitch(): Promise<void> {
         try {
-            const config = vscode.workspace.getConfiguration('backtick-plus-plus');
+            const config = this.vscode.workspace.getConfiguration('backtick-plus-plus');
             const newWindowPosition = config.get<string>('newWindowPosition', 'top');
             const activationMode = config.get<string>('activationMode', 'automatic');
 
             const windows = await this.helperProcess.getWindows(newWindowPosition, activationMode);
 
             if (windows.length < 2) {
-                vscode.window.showInformationMessage('Need at least 2 VS Code windows for instant switch');
+                this.vscode.window.showInformationMessage('Need at least 2 VS Code windows for instant switch');
                 return;
             }
 
             // Activate the second window in the list
             await this.helperProcess.activateWindow(windows[1].id);
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to switch windows: ${error.message}`);
+            this.vscode.window.showErrorMessage(`Failed to switch windows: ${error.message}`);
         }
     }
 
@@ -229,7 +311,7 @@ class WindowSwitcher {
             this.quickPick.dispose();
         }
 
-        this.quickPick = vscode.window.createQuickPick();
+        this.quickPick = this.vscode.window.createQuickPick();
         this.quickPick.placeholder = 'Select a VS Code window';
         this.quickPick.canSelectMany = false;
 
@@ -274,7 +356,7 @@ class WindowSwitcher {
             try {
                 await this.helperProcess.activateWindow(selectedWindow.id);
             } catch (error: any) {
-                vscode.window.showErrorMessage(`Failed to activate window: ${error.message}`);
+                this.vscode.window.showErrorMessage(`Failed to activate window: ${error.message}`);
             }
         }
 
@@ -293,28 +375,34 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('Backtick++ extension is now active');
 
     // Initialize helper process
-    helperProcess = new HelperProcess();
-    windowSwitcher = new WindowSwitcher(helperProcess);
+    helperProcess = new HelperProcess(vscodeAPI);
+    windowSwitcher = new WindowSwitcher(helperProcess, vscodeAPI);
 
     // Register commands
-    const switchForward = vscode.commands.registerCommand('backtick-plus-plus.switchForward', () => {
+    const switchForward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchForward', () => {
         windowSwitcher.showSwitcher('forward');
     });
 
-    const switchBackward = vscode.commands.registerCommand('backtick-plus-plus.switchBackward', () => {
+    const switchBackward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchBackward', () => {
         windowSwitcher.showSwitcher('backward');
     });
 
-    const instantSwitch = vscode.commands.registerCommand('backtick-plus-plus.instantSwitch', () => {
+    const instantSwitch = vscodeAPI.commands.registerCommand('backtick-plus-plus.instantSwitch', () => {
         windowSwitcher.instantSwitch();
     });
 
     context.subscriptions.push(switchForward, switchBackward, instantSwitch);
 
     // Start helper process
-    helperProcess.start().catch((error: any) => {
-        vscode.window.showErrorMessage(`Failed to start Backtick++ helper: ${error.message}`);
-    });
+    helperProcess.start()
+        .then(() => helperProcess.checkStatusAndPermissions())
+        .catch((error: any) => {
+            if (vscodeAPI.window) {
+                vscodeAPI.window.showErrorMessage(`Failed to start Backtick++ helper: ${error.message}`);
+            } else {
+                console.error(`Failed to start Backtick++ helper: ${error.message}`);
+            }
+        });
 }
 
 export function deactivate() {

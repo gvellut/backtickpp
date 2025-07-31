@@ -77,11 +77,14 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -p ./",
-        "watch": "tsc -watch -p ./"
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "vscode-test",
+        "test:cli": "npm run compile && node ./out/test-cli.js"
     },
     "devDependencies": {
-        "@types/node": "^18.0.0",
-        "@types/vscode": "^1.80.0",
+        "@types/vscode": "^1.89.0",
         "typescript": "^5.0.0"
     }
 }
