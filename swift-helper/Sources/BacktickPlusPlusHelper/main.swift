@@ -443,30 +443,43 @@ class BacktickPlusPlusHelper {
             // Identify new windows
             let existingWindowIds = Set(windowOrder)
             let newWindowIds = currentWindowIds.subtracting(existingWindowIds)
-            if !newWindowIds.isEmpty {
-                print("✨ Found new windows: \(newWindowIds)")
+            let sortedNewWindowIds = newWindowIds.sorted(by: >)  // Sort DESC by ID
+
+            if !sortedNewWindowIds.isEmpty {
+                print("✨ Found new windows, sorted DESC: \(sortedNewWindowIds)")
             }
 
-            if request.activationMode == "automatic" {
-                print("⚙️  Automatic mode")
+            let isInitialRun = windowOrder.isEmpty && !currentWindowIds.isEmpty
+
+            if request.activationMode == "automatic" || isInitialRun {
+                print(
+                    "⚙️  Automatic mode activated \(isInitialRun ? "(due to initial run in manual mode)" : "")"
+                )
+
+                var newWindowIdsToAdd = Set(sortedNewWindowIds)
                 // In automatic mode, the active window always goes to the top.
                 if let active = activeWindow {
                     windowOrder.removeAll { $0 == active.id }
                     windowOrder.insert(active.id, at: 0)
                     print("⬆️  Moved active window to top: \(active.id). Order: \(windowOrder)")
+                    // If the active window was a new window, don't add it again.
+                    newWindowIdsToAdd.remove(active.id)
                 }
 
                 // Add new windows below the active one or at the bottom.
-                if !newWindowIds.isEmpty {
+                let sortedNewWindowIdsToAdd = sortedNewWindowIds.filter {
+                    newWindowIdsToAdd.contains($0)
+                }
+                if !sortedNewWindowIdsToAdd.isEmpty {
                     if request.newWindowPosition.lowercased() == "top" {
                         // If there's an active window, new windows go below it (index 1).
                         // Otherwise, they go to the top (index 0).
                         let insertionIndex =
                             (activeWindow != nil && windowOrder.contains(activeWindow!.id)) ? 1 : 0
-                        windowOrder.insert(contentsOf: newWindowIds, at: insertionIndex)
+                        windowOrder.insert(contentsOf: sortedNewWindowIdsToAdd, at: insertionIndex)
                         print("➕ Added new windows near top. Order: \(windowOrder)")
                     } else {  // "bottom"
-                        windowOrder.append(contentsOf: newWindowIds)
+                        windowOrder.append(contentsOf: sortedNewWindowIdsToAdd)
                         print("➕ Added new windows at bottom. Order: \(windowOrder)")
                     }
                 }
@@ -474,12 +487,12 @@ class BacktickPlusPlusHelper {
                 print("⚙️  Manual mode")
                 // In manual mode, new windows are added based on position setting,
                 // without reordering existing ones.
-                if !newWindowIds.isEmpty {
+                if !sortedNewWindowIds.isEmpty {
                     if request.newWindowPosition.lowercased() == "top" {
-                        windowOrder.insert(contentsOf: newWindowIds, at: 0)
+                        windowOrder.insert(contentsOf: sortedNewWindowIds, at: 0)
                         print("➕ Added new windows at top. Order: \(windowOrder)")
                     } else {  // "bottom"
-                        windowOrder.append(contentsOf: newWindowIds)
+                        windowOrder.append(contentsOf: sortedNewWindowIds)
                         print("➕ Added new windows at bottom. Order: \(windowOrder)")
                     }
                 }
@@ -526,7 +539,7 @@ class BacktickPlusPlusHelper {
             print("🔄 Attempting to activate window with ID: \(request.id)")
             if activateWindowWithId(request.id) {
                 print("✅ Window activated successfully")
-                print("🔄 Moving activated window to top of order...")
+                print("🔄 Moving activated window to top of order")
                 // Move activated window to top of order
                 windowOrder.removeAll { $0 == request.id }
                 windowOrder.insert(request.id, at: 0)
@@ -621,6 +634,22 @@ class BacktickPlusPlusHelper {
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let isVscodeFrontmost = frontmostApp?.bundleIdentifier == vscodeBundleId
 
+        // First, determine the single focused window ID from the application
+        var activeWindowId: CGWindowID?
+        if isVscodeFrontmost {
+            var focusedWindowRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(
+                appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
+                let focusedWindow = focusedWindowRef
+            {
+                var windowId: CGWindowID = 0
+                if _AXUIElementGetWindow(focusedWindow as! AXUIElement, &windowId) == .success {
+                    activeWindowId = windowId
+                    print("🎯 Found active window ID via kAXFocusedWindowAttribute: \(windowId)")
+                }
+            }
+        }
+
         for (index, windowElement) in windowElements.enumerated() {
             var titleRef: CFTypeRef?
             var windowIdRef: CGWindowID = 0
@@ -639,12 +668,8 @@ class BacktickPlusPlusHelper {
                 continue
             }
 
-            // Determine if the window is the active one for the application
-            var isMainRef: CFTypeRef?
-            let mainAttrResult = AXUIElementCopyAttributeValue(
-                windowElement, kAXMainAttribute as CFString, &isMainRef)
-            let isMain = (mainAttrResult == .success) && (isMainRef as? NSNumber)?.boolValue == true
-            let isCurrentlyActive = isVscodeFrontmost && isMain
+            // Determine if the window is the active one by comparing with the ID found earlier
+            let isCurrentlyActive = (windowIdRef == activeWindowId)
 
             windows.append((id: windowIdRef, title: title, isCurrentlyActive: isCurrentlyActive))
             print(
