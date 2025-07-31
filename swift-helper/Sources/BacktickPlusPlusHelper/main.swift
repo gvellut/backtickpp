@@ -76,9 +76,24 @@ class BacktickPlusPlusHelper {
         }
 
         // Bind to socket path
-        let addr = sockaddr_un.unix(path: Self.socketPath)
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+
+        let pathBytes = Self.socketPath.utf8CString
+        let maxPathLength = MemoryLayout.size(ofValue: addr.sun_path)
+        let pathLength = min(pathBytes.count - 1, maxPathLength - 1)
+
+        withUnsafeMutablePointer(to: &addr.sun_path.0) { pathPtr in
+            pathBytes.prefix(pathLength).withUnsafeBufferPointer { buffer in
+                pathPtr.initialize(from: buffer.baseAddress!, count: pathLength)
+            }
+        }
+
+        // Set sun_len field correctly for BSD systems
+        addr.sun_len = UInt8(MemoryLayout<UInt8>.size + MemoryLayout<sa_family_t>.size + pathLength)
+
         let data = withUnsafePointer(to: addr) { pointer in
-            Data(bytes: pointer, count: MemoryLayout<sockaddr_un>.size)
+            Data(bytes: pointer, count: Int(addr.sun_len))
         }
 
         let address = data.withUnsafeBytes { bytes in
@@ -384,31 +399,6 @@ class BacktickPlusPlusHelper {
         }
 
         return false
-    }
-}
-
-// MARK: - Unix Socket Helper
-
-extension sockaddr_un {
-    static func unix(path: String) -> sockaddr_un {
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-
-        let pathBytes = path.utf8CString
-        let maxPathLength = MemoryLayout.size(ofValue: addr.sun_path)
-        let pathLength = min(pathBytes.count - 1, maxPathLength - 1)
-
-        withUnsafeMutablePointer(to: &addr.sun_path.0) { pathPtr in
-            pathBytes.prefix(pathLength).withUnsafeBufferPointer { buffer in
-                pathPtr.initialize(from: buffer.baseAddress!, count: pathLength)
-            }
-        }
-
-        // Set sun_len field for BSD systems
-        let sunLenSize = MemoryLayout<UInt8>.size + MemoryLayout<sa_family_t>.size + pathLength
-        addr.sun_len = UInt8(sunLenSize)
-
-        return addr
     }
 }
 

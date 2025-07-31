@@ -39,18 +39,15 @@
         "keybindings": [
             {
                 "command": "backtick-plus-plus.switchForward",
-                "key": "cmd+`",
-                "mac": "cmd+`"
+                "mac": "cmd+alt+shift+f`"
             },
             {
                 "command": "backtick-plus-plus.switchBackward",
-                "key": "cmd+shift+`",
-                "mac": "cmd+shift+`"
+                "mac": "cmd+alt+shift+g`"
             },
             {
                 "command": "backtick-plus-plus.instantSwitch",
-                "key": "cmd+alt+`",
-                "mac": "cmd+alt+`"
+                "mac": "cmd+alt+shift+d`"
             }
         ],
         "configuration": {
