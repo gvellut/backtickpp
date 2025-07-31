@@ -5,3 +5,10 @@ On the VSCode side, the UI will be the same as for workbench.action.quickSwitchW
 - on the shortcut pressed, a list of ordered windows for VSCode will open.
 
 It will need to have a shortcut
+
+
+
+
+Funny :
+
+This directly addresses the TypeError: Need 3 arguments, got 2. I have run this exact code against the latest libraries and can confirm it executes correctly.

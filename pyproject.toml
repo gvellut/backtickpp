@@ -4,4 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["pyobjc-framework-cocoa>=11.1", "pyobjc-framework-quartz>=11.1"]
+dependencies = [
+    "pyobjc>=11.1",
+    "pyobjc-framework-applicationservices>=11.1",
+    "pyobjc-framework-cocoa>=11.1",
+    "pyobjc-framework-quartz>=11.1",
+]

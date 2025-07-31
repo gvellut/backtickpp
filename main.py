@@ -1,70 +1,78 @@
+#!/usr/bin/env python3
+
 import sys
 
 from AppKit import NSRunningApplication
-from Quartz import (
-    CGWindowListCopyWindowInfo,
-    kCGNullWindowID,
-    kCGWindowListOptionOnScreenOnly,
+from ApplicationServices import (
+    AXUIElementCopyAttributeValue,
+    AXUIElementCreateApplication,
+    kAXTitleAttribute,
+    kAXWindowsAttribute,
 )
+from HIServices import kAXErrorAPIDisabled
 
 
-def get_vscode_pid():
-    """Find the process ID (PID) for Visual Studio Code."""
-    # The bundle identifier for VS Code is consistent.
+def main():
+    """
+    Final correct script for listing VS Code window titles using Accessibility.
+    This version uses the correct 3-argument signature for AXUIElementCopyAttributeValue.
+    """
+    print("--- Looking for Visual Studio Code application ---")
+
     vscode_bundle_id = "com.microsoft.VSCode"
-
-    # Get a list of all running applications
     running_apps = NSRunningApplication.runningApplicationsWithBundleIdentifier_(
         vscode_bundle_id
     )
 
     if not running_apps:
-        return None
-
-    # Return the processIdentifier of the first instance found
-    return running_apps[0].processIdentifier()
-
-
-def main():
-    """
-    Main function to find and print VS Code window information.
-    """
-    print("--- Looking for Visual Studio Code windows ---")
-
-    vscode_pid = get_vscode_pid()
-
-    if not vscode_pid:
-        print("\nError: Visual Studio Code is not running.")
-        print("Please open some VS Code windows and run this script again.")
+        print("Error: Visual Studio Code is not running.")
         sys.exit(1)
 
-    print(f"Found VS Code running with PID: {vscode_pid}\n")
+    vscode_app = running_apps[0]
+    pid = vscode_app.processIdentifier()
+    print(f"Found VS Code running with PID: {pid}\n")
 
-    # Get a list of all on-screen windows.
-    # The result is a list of dictionaries, one for each window.
-    window_list = CGWindowListCopyWindowInfo(
-        kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+    app_element = AXUIElementCreateApplication(pid)
+
+    # --- THE CORRECT 3-ARGUMENT CALL ---
+    # The 3rd argument is a placeholder for the C output pointer.
+    error, window_elements = AXUIElementCopyAttributeValue(
+        app_element, kAXWindowsAttribute, None
     )
 
-    vscode_windows_found = 0
-    for window in window_list:
-        # Check if the window belongs to the VS Code process
-        if window.get("kCGWindowOwnerPID") == vscode_pid:
-            # Not all windows have names (e.g., helper or background windows)
-            window_name = window.get("kCGWindowName")
-            if window_name:
-                vscode_windows_found += 1
+    if error == kAXErrorAPIDisabled:
+        print("\n[X] ACTION REQUIRED: Accessibility permission is NOT granted.")
+        print("This script needs permission to control other applications.")
+        print("\n--> Please do the following: <--")
+        print("1. Open System Settings > Privacy & Security > Accessibility.")
+        print(
+            "2. Find and enable the application running this script (e.g., 'Terminal')."
+        )
+        print(
+            "3. You MUST quit and relaunch the Terminal/editor for the change to take effect."
+        )
+        print("\nAfter granting permission, run this script again.\n")
+        sys.exit(1)
 
-                # Encode the string to see its raw bytes
-                raw_unicode_bytes = window_name.encode("utf-8")
+    elif error != 0 or not window_elements:
+        print("Could not retrieve window list from VS Code.")
+        print("This could be because no windows are open or another error occurred.")
+        sys.exit(1)
 
-                print(f"Window ID:  {window.get('kCGWindowNumber')}")
-                print(f"Window Name (Text):  '{window_name}'")
-                print(f"Window Name (Raw UTF-8 Bytes): {raw_unicode_bytes}\n")
+    print("Accessibility permission is granted. Proceeding...")
+    print(f"--- Found {len(window_elements)} VS Code Window(s) via Accessibility ---")
 
-    if vscode_windows_found == 0:
-        print("VS Code is running, but no named windows were found.")
-        print("This can happen if only the initial welcome screen is open.")
+    for i, window_element in enumerate(window_elements):
+        # --- APPLYING THE SAME 3-ARGUMENT FIX HERE ---
+        err, window_title = AXUIElementCopyAttributeValue(
+            window_element, kAXTitleAttribute, None
+        )
+
+        print(f"\nWindow {i + 1}:")
+        if err == 0 and window_title:
+            print(f"  Title: '{window_title}'")
+        else:
+            print("  Title: <No title available for this window element>")
 
 
 if __name__ == "__main__":
