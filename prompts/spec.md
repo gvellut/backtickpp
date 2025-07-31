@@ -29,7 +29,7 @@ A faceless macOS agent application responsible for all window state management a
         3.  If successful, moves that same window ID to the top of its internal ordered list.
     *   **`shutdown()`:** Receives this command and cleanly terminates its own process.
 
-#### **2. VS Code Extension (`backtick-plus-plus`)**
+#### **2. VS Code Extension (`backtick-plus-plus` or `backtrickpp` in short form)**
 
 The user-facing component providing UI, shortcuts, and process orchestration.
 

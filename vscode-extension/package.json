@@ -1,0 +1,90 @@
+{
+    "name": "backtick-plus-plus",
+    "displayName": "Backtick++",
+    "description": "Advanced window switching for VS Code on macOS",
+    "version": "1.0.0",
+    "publisher": "backtickpp",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "keywords": [
+        "window",
+        "switcher",
+        "macos",
+        "navigation"
+    ],
+    "activationEvents": [],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "backtick-plus-plus.switchForward",
+                "title": "Switch Forward",
+                "category": "Backtick++"
+            },
+            {
+                "command": "backtick-plus-plus.switchBackward",
+                "title": "Switch Backward",
+                "category": "Backtick++"
+            },
+            {
+                "command": "backtick-plus-plus.instantSwitch",
+                "title": "Instant Switch",
+                "category": "Backtick++"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "backtick-plus-plus.switchForward",
+                "key": "cmd+`",
+                "mac": "cmd+`"
+            },
+            {
+                "command": "backtick-plus-plus.switchBackward",
+                "key": "cmd+shift+`",
+                "mac": "cmd+shift+`"
+            },
+            {
+                "command": "backtick-plus-plus.instantSwitch",
+                "key": "cmd+alt+`",
+                "mac": "cmd+alt+`"
+            }
+        ],
+        "configuration": {
+            "title": "Backtick++",
+            "properties": {
+                "backtick-plus-plus.activationMode": {
+                    "type": "string",
+                    "enum": [
+                        "automatic",
+                        "manual"
+                    ],
+                    "default": "automatic",
+                    "description": "How window activation is handled. 'automatic' moves the current window to top, 'manual' preserves the current order."
+                },
+                "backtick-plus-plus.newWindowPosition": {
+                    "type": "string",
+                    "enum": [
+                        "top",
+                        "bottom"
+                    ],
+                    "default": "top",
+                    "description": "Where new windows appear in the switcher list."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/node": "^18.0.0",
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.0.0"
+    }
+}
