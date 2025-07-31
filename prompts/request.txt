@@ -1,10 +1,48 @@
 v1
 
 The extension will be called backtick-plus-plus.
-On the VSCode side, the UI will be the same as for workbench.action.quickSwitchWindow :
-- on the shortcut pressed, a list of ordered windows for VSCode will open.
 
-It will need to have a shortcut
+Write a short spec that requests a detailed spec. But short enough (but with enough details that the detailed spec can be generated from it) that I can edit it.
+Mention if things do not make sense or are missing from the POV of things that were discussed previously. If i have interrogation in the text below, determine what should actually be in the spec (the spec should not have those questions). Answer those questions first without writing the actual spec. Instead mention the edit to be made so I can approve them or rephrase them.
+
+It will spec :
+
+- the background process launched by the VSCode extension:
+  - The background extension will be in swift : dependencies will have to be listed ; a list of command for project initialization and dependency installation will need to be provided
+  - it will be permanent (maintain its states ie ordered list of windows along multiple calls)
+  - it will have to be launched when the first VSCode window with the extension enabled launches (and only one on the whole system : not sure of the VSCode intialization procedure but if multiple VSCode windows launch almost simultaneously like on start with window restore => only one should stay).
+  - The process will have to communicate with a VSCode extension so the used interprocess communication should be compatibile
+  - the process should have a command to interrogate the status of Accessibility permission of VScode (unless the extension can do it)
+  - the process should have a command to return the list of windows, with the currently active one indicated (should be the one doing the query and activating the extension)
+    - the list of windows should be stable (possibly with an ID of the window and not parse the title)
+    - the list should be indentical 
+    - the process should use the AXUIElementCopyAttributeValue API to interrogate the list of windows, the first time it is called and on every calls (to detect the new windows or the ones that closed)
+    - this command should have an argument for where to put new windows on the list : ie 
+        - if argument is TOP:
+            - if the currently active window is a window already seen, : the new windows should be right after (in alphabetical order of the title). 
+            -  if the currently active window is a new window : the other new windows should be following that with the window that was at the top, below them  (in alphabetical order)
+        - if argument is BOTTOM :
+            - if the currently active window is a window already seen, : the new windows should be at the bottom of the list (in aphabetical order)
+            - if the currently active window is a new window : the other new windows should be at the bottom of the list (in aphabetical order)
+    - The currently active window should be at the top (even if the extension was not used to switch to it ; eg through the standard VSCode manager or clicked on that window in macOS)
+  - the process should have a command to tell a window should be activated so it can activate it and the internal list can be updated and that newly active window put at the top
+  - it should be that, if no new window, you could alternate between 2 windows by pressing the shortcut one time, then the other and so on
+
+- the VSCode extension : 
+  - shortcut : forward to go down the list of windows ; another one to go up
+  - the UI will be the same as for workbench.action.quickSwitchWindow : see screenshot. ie list of all the windows using the raw titles (but with no icons or diry status).
+    - With the current window at the top marked with a tick (to be drwan by the extension)
+    - multiple presses of the shortcuts will go down that list    
+        - is it possible to have something like the quick editor switcher (in a single VSCode window) : ie the shortcut is ctrl-tab : it displays a menu then, but if the ctrl keeps being pressed, the menu stays open, if i press tab (with ctrl still pressed), the next editor in the switcher menu is selected. Only when I let go of the ctrl, the selected editor becomes active. I would like that for the shortcut : modifier + key, if the modifier is pressed multiple times, the selected item changes.
+    - the backward shortcut will go up
+    - the arrows can be used
+  - for the accessibility permission : since it is VSCode that launches the background process, it should be the one with the permission ? is that the case ?
+  - on the shortcut first pressed, it should query the background process for accessibility permision of VSCode (or is that something the VSCode extension can do ?) then indicate if not the case in the panel that shows as well and the system dialog for requesting the permission.
+    - I was told this : "To actually request permission:  Only apps with a macOS bundle can trigger the system dialog for Accessibility permission.  CLI tools/scripts can't prompt; you must add their parent app (like Terminal or VSCode) in System Settings." Is that the case : can the background process trigger a request for permission on the VSCode app ?
+    - is it possible for VScode to request a restart : ie quit and start on request from the user with a entry in the extension menu
+    - so if not possible to query the list of running windows => should have a panel indicating no permission + a way to restart VSCode + trigger the request for permission
+  - the extension inicates to the background process which window has been selected so it can activate it and put it on top of the liust
+  - the extenssion should have a setting to indicate where to put new windows (on top or bottom of the list)
 
 
 
