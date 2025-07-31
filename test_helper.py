@@ -10,8 +10,8 @@ import time
 SOCKET_PATH = "/tmp/backtick-plus-plus-helper.sock"
 
 
-def send_command(command, data=""):
-    """Send a command to the helper process and return the response"""
+def _send_command(command, data=""):
+    """Send a raw command to the helper process and return the raw response"""
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.connect(SOCKET_PATH)
@@ -25,13 +25,66 @@ def send_command(command, data=""):
         if response.startswith("OK:"):
             return response[3:]
         elif response.startswith("ERROR:"):
-            raise Exception(response[6:])
+            raise Exception(f"Helper returned error: {response[6:]}")
         else:
-            return response
+            # Should not happen with the current helper implementation
+            raise Exception(f"Received unexpected response: {response}")
 
     except Exception as e:
         print(f"Error communicating with helper: {e}")
         return None
+
+
+def get_status():
+    """Get the status from the helper."""
+    print("1. Testing getStatus command...")
+    try:
+        response = _send_command("getStatus")
+        if response:
+            return json.loads(response)
+    except Exception as e:
+        print(f"   Failed to get status: {e}")
+    return None
+
+
+def get_windows(new_window_position="top", activation_mode="automatic"):
+    """Get the list of windows from the helper."""
+    print("\n2. Testing getWindows command...")
+    try:
+        request = {
+            "newWindowPosition": new_window_position,
+            "activationMode": activation_mode,
+        }
+        response = _send_command("getWindows", json.dumps(request))
+        if response:
+            return json.loads(response)
+    except Exception as e:
+        print(f"   Failed to get windows: {e}")
+    return None
+
+
+def activate_window(window_id):
+    """Request the helper to activate a specific window."""
+    print("\n3. Testing activateWindow command...")
+    try:
+        request = {"id": window_id}
+        print(f"   Activating window with ID: {window_id}")
+        response = _send_command("activateWindow", json.dumps(request))
+        return response
+    except Exception as e:
+        print(f"   Failed to activate window: {e}")
+    return None
+
+
+def shutdown_helper():
+    """Request the helper to shut down."""
+    print("\n4. Testing shutdown command...")
+    try:
+        response = _send_command("shutdown")
+        return response
+    except Exception as e:
+        print(f"   Failed to send shutdown command: {e}")
+    return None
 
 
 def test_helper():
@@ -40,37 +93,60 @@ def test_helper():
     print("=" * 40)
 
     # Test 1: Get Status
-    print("1. Testing getStatus command...")
-    response = send_command("getStatus")
-    if response:
-        try:
-            status = json.loads(response)
-            print(f"   Status: {status}")
-        except json.JSONDecodeError:
-            print(f"   Response: {response}")
+    status = get_status()
+    if status:
+        print(f"   Status: {status}")
     else:
-        print("   Failed to get status")
+        print("   getStatus test failed.")
 
     # Test 2: Get Windows
-    print("\n2. Testing getWindows command...")
-    request = {"newWindowPosition": "top", "activationMode": "automatic"}
-    response = send_command("getWindows", json.dumps(request))
-    if response:
-        try:
-            windows = json.loads(response)
-            print(f"   Found {len(windows)} windows:")
-            for window in windows:
-                print(
-                    f"      - ID: {window['id']}, Title: {window['title']}, Active: {window['isCurrentlyActive']}"
-                )
-        except json.JSONDecodeError:
-            print(f"   Response: {response}")
+    windows = get_windows()
+    if windows:
+        print(f"   Found {len(windows)} windows:")
+        for window in windows:
+            print(
+                f"      - ID: {window['id']}, "
+                f"Title: {window['title']}, "
+                f"Active: {window['isCurrentlyActive']}"
+            )
     else:
-        print("   Failed to get windows")
+        print("   getWindows test failed.")
+        # If we can't get windows, we can't continue to other tests
+        return
 
-    # Test 3: Shutdown (comment out to keep helper running)
-    # print("\n3. Testing shutdown command...")
-    # response = send_command("shutdown")
+    # Test 3: Activate Window
+    if len(windows) > 1:
+        # Activate the second window in the list to test activation
+        window_to_activate = windows[3]
+        response = activate_window(window_to_activate["id"])
+        print(f"   Activation response: {response}")
+    else:
+        print("\nSkipping activateWindow test: less than 2 windows available.")
+
+    windows = get_windows()
+    if windows:
+        print(f"   Found {len(windows)} windows:")
+        for window in windows:
+            print(
+                f"      - ID: {window['id']}, "
+                f"Title: {window['title']}, "
+                f"Active: {window['isCurrentlyActive']}"
+            )
+    else:
+        print("   getWindows test failed.")
+        # If we can't get windows, we can't continue to other tests
+        return
+
+    if len(windows) > 1:
+        # Activate the second window in the list to test activation
+        window_to_activate = windows[1]
+        response = activate_window(window_to_activate["id"])
+        print(f"   Activation response: {response}")
+    else:
+        print("\nSkipping activateWindow test: less than 2 windows available.")
+
+    # Test 4: Shutdown (comment out to keep helper running)
+    # response = shutdown_helper()
     # print(f"   Shutdown response: {response}")
 
 

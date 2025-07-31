@@ -431,26 +431,60 @@ class BacktickPlusPlusHelper {
             // Get current VS Code windows
             print("🔍 Getting VS Code windows...")
             let currentWindows = getVSCodeWindows()
-            print("📊 Found \(currentWindows.count) VS Code windows")
-            for (index, window) in currentWindows.enumerated() {
-                print(
-                    "  Window \(index + 1): ID=\(window.id), Title='\(window.title)', Active=\(window.isCurrentlyActive)"
-                )
+            let currentWindowIds = Set(currentWindows.map { $0.id })
+            let activeWindow = currentWindows.first(where: { $0.isCurrentlyActive })
+            print(
+                "📊 Found \(currentWindows.count) VS Code windows. Active: \(activeWindow?.id ?? 0)")
+
+            // Remove closed windows from order
+            windowOrder.removeAll { !currentWindowIds.contains($0) }
+            print("🗑️  Removed closed windows. Order is now: \(windowOrder)")
+
+            // Identify new windows
+            let existingWindowIds = Set(windowOrder)
+            let newWindowIds = currentWindowIds.subtracting(existingWindowIds)
+            if !newWindowIds.isEmpty {
+                print("✨ Found new windows: \(newWindowIds)")
             }
 
-            // Handle activation mode
-            print("🎮 Processing activation mode: '\(request.activationMode)'")
             if request.activationMode == "automatic" {
-                print("🔄 Updating window order with frontmost window...")
-                updateWindowOrderWithFrontmost(currentWindows)
-                print("📋 Current window order: \(windowOrder)")
-            } else {
-                print("📝 Manual mode - preserving current order")
+                print("⚙️  Automatic mode")
+                // In automatic mode, the active window always goes to the top.
+                if let active = activeWindow {
+                    windowOrder.removeAll { $0 == active.id }
+                    windowOrder.insert(active.id, at: 0)
+                    print("⬆️  Moved active window to top: \(active.id). Order: \(windowOrder)")
+                }
+
+                // Add new windows below the active one or at the bottom.
+                if !newWindowIds.isEmpty {
+                    if request.newWindowPosition.lowercased() == "top" {
+                        // If there's an active window, new windows go below it (index 1).
+                        // Otherwise, they go to the top (index 0).
+                        let insertionIndex =
+                            (activeWindow != nil && windowOrder.contains(activeWindow!.id)) ? 1 : 0
+                        windowOrder.insert(contentsOf: newWindowIds, at: insertionIndex)
+                        print("➕ Added new windows near top. Order: \(windowOrder)")
+                    } else {  // "bottom"
+                        windowOrder.append(contentsOf: newWindowIds)
+                        print("➕ Added new windows at bottom. Order: \(windowOrder)")
+                    }
+                }
+            } else {  // Manual mode
+                print("⚙️  Manual mode")
+                // In manual mode, new windows are added based on position setting,
+                // without reordering existing ones.
+                if !newWindowIds.isEmpty {
+                    if request.newWindowPosition.lowercased() == "top" {
+                        windowOrder.insert(contentsOf: newWindowIds, at: 0)
+                        print("➕ Added new windows at top. Order: \(windowOrder)")
+                    } else {  // "bottom"
+                        windowOrder.append(contentsOf: newWindowIds)
+                        print("➕ Added new windows at bottom. Order: \(windowOrder)")
+                    }
+                }
             }
 
-            // Update window order with new/closed windows
-            print("🔄 Updating window order with new/closed windows...")
-            updateWindowOrder(currentWindows, newWindowPosition: request.newWindowPosition)
             print("📋 Final window order: \(windowOrder)")
 
             // Build response
@@ -548,140 +582,87 @@ class BacktickPlusPlusHelper {
     // MARK: - Window Management
 
     private func getVSCodeWindows() -> [(id: CGWindowID, title: String, isCurrentlyActive: Bool)] {
-        print("🔍 === GetVSCodeWindows Started ===")
+        print("🔍 === GetVSCodeWindows Started (AX API) ===")
 
-        // Use a more targeted window list query for better performance
-        print("📋 Requesting window list from Core Graphics...")
-        guard
-            let windowList = CGWindowListCopyWindowInfo(
-                [.optionOnScreenOnly, .excludeDesktopElements],
-                kCGNullWindowID
-            ) as? [[String: Any]]
-        else {
-            print("❌ Failed to get window list from Core Graphics")
+        let vscodeBundleId = "com.microsoft.VSCode"
+        let runningApps = NSRunningApplication.runningApplications(
+            withBundleIdentifier: vscodeBundleId)
+
+        guard let vscodeApp = runningApps.first else {
+            print("❌ \(vscodeBundleId) is not running.")
             return []
         }
-        print("✅ Got window list with \(windowList.count) total windows")
 
-        var windows: [(id: CGWindowID, title: String, isCurrentlyActive: Bool)] = []
-        var frontmostWindow: CGWindowID?
+        let pid = vscodeApp.processIdentifier
+        print("✅ Found VS Code running with PID: \(pid)")
 
-        // Get the frontmost VS Code window more efficiently
-        print("🔍 Looking for frontmost VS Code application...")
-        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
-            frontmostApp.bundleIdentifier?.contains("com.microsoft.VSCode") == true
-        {
-            let frontmostPID = frontmostApp.processIdentifier
-            print("✅ Found frontmost VS Code app with PID: \(frontmostPID)")
-            print("📱 Bundle ID: \(frontmostApp.bundleIdentifier ?? "unknown")")
+        let appElement = AXUIElementCreateApplication(pid)
 
-            // Find the frontmost window for this PID
-            print("🔍 Searching for frontmost window...")
-            for (index, windowInfo) in windowList.enumerated() {
-                if let pid = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
-                    pid == frontmostPID,
-                    let windowId = windowInfo[kCGWindowNumber as String] as? CGWindowID,
-                    let windowTitle = windowInfo[kCGWindowName as String] as? String,
-                    !windowTitle.isEmpty,
-                    windowTitle.contains("— ")
-                {
-                    frontmostWindow = windowId
-                    print(
-                        "✅ Found frontmost window at index \(index): ID=\(windowId), Title='\(windowTitle)'"
-                    )
-                    break
-                }
+        var windowElementsRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            appElement, kAXWindowsAttribute as CFString, &windowElementsRef)
+
+        if result != .success {
+            print("❌ Failed to get windows from Accessibility API. Result: \(result)")
+            if result == .apiDisabled {
+                print("👉 Accessibility permission is not granted.")
             }
-
-            if frontmostWindow == nil {
-                print("⚠️  No frontmost document windows found for VS Code")
-            }
-        } else {
-            print("⚠️  VS Code is not the frontmost application")
+            return []
         }
 
-        // Process windows more efficiently
-        print("🔄 Processing all windows to find VS Code instances...")
-        var processedCount = 0
-        var vsCodeCount = 0
+        guard let windowElements = windowElementsRef as? [AXUIElement] else {
+            print("✅ VS Code has no open windows.")
+            return []
+        }
 
-        for (index, windowInfo) in windowList.enumerated() {
-            processedCount += 1
+        print("📊 Found \(windowElements.count) window elements via AX API.")
 
-            guard let ownerName = windowInfo[kCGWindowOwnerName as String] as? String else {
+        var windows: [(id: CGWindowID, title: String, isCurrentlyActive: Bool)] = []
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let isVscodeFrontmost = frontmostApp?.bundleIdentifier == vscodeBundleId
+
+        for (index, windowElement) in windowElements.enumerated() {
+            var titleRef: CFTypeRef?
+            var windowIdRef: CGWindowID = 0
+
+            let titleResult = AXUIElementCopyAttributeValue(
+                windowElement, kAXTitleAttribute as CFString, &titleRef)
+            let windowIdResult = _AXUIElementGetWindow(windowElement, &windowIdRef)
+
+            guard let title = titleRef as? String, !title.isEmpty, titleResult == .success else {
+                print("🔄 Skipping window \(index + 1) - no title.")
                 continue
             }
 
-            print("🔍 Processing window \(index + 1)/\(windowList.count): Owner='\(ownerName)'")
-
-            if ownerName == "Code" || ownerName == "Visual Studio Code" {
-                vsCodeCount += 1
-
-                guard let windowId = windowInfo[kCGWindowNumber as String] as? CGWindowID,
-                    let windowTitle = windowInfo[kCGWindowName as String] as? String,
-                    !windowTitle.isEmpty,
-                    windowTitle.contains("— ")  // Only document windows
-                else {
-                    print("🔄 Skipping VS Code window at index \(index) - not a document window")
-                    continue
-                }
-
-                let isActive = windowId == frontmostWindow
-                windows.append((id: windowId, title: windowTitle, isCurrentlyActive: isActive))
-                print(
-                    "✅ Added VS Code window: ID=\(windowId), Title='\(windowTitle)', Active=\(isActive)"
-                )
+            guard windowIdResult == .success, windowIdRef != 0 else {
+                print("🔄 Skipping window \(index + 1) ('\(title)') - could not get window ID.")
+                continue
             }
+
+            // Determine if the window is the active one for the application
+            var isMainRef: CFTypeRef?
+            let mainAttrResult = AXUIElementCopyAttributeValue(
+                windowElement, kAXMainAttribute as CFString, &isMainRef)
+            let isMain = (mainAttrResult == .success) && (isMainRef as? NSNumber)?.boolValue == true
+            let isCurrentlyActive = isVscodeFrontmost && isMain
+
+            windows.append((id: windowIdRef, title: title, isCurrentlyActive: isCurrentlyActive))
+            print(
+                "✅ Added window: ID=\(windowIdRef), Title='\(title)', Active=\(isCurrentlyActive)")
         }
 
-        print("📊 Window processing complete:")
-        print("  - Total windows processed: \(processedCount)")
-        print("  - VS Code windows found: \(vsCodeCount)")
-        print("  - Document windows returned: \(windows.count)")
         print("🏁 === GetVSCodeWindows Completed ===")
-
         return windows
-    }
-
-    private func updateWindowOrderWithFrontmost(
-        _ currentWindows: [(id: CGWindowID, title: String, isCurrentlyActive: Bool)]
-    ) {
-        if let frontmost = currentWindows.first(where: { $0.isCurrentlyActive }) {
-            windowOrder.removeAll { $0 == frontmost.id }
-            windowOrder.insert(frontmost.id, at: 0)
-        }
-    }
-
-    private func updateWindowOrder(
-        _ currentWindows: [(id: CGWindowID, title: String, isCurrentlyActive: Bool)],
-        newWindowPosition: String
-    ) {
-        let currentWindowIds = Set(currentWindows.map { $0.id })
-
-        // Remove closed windows
-        windowOrder.removeAll { !currentWindowIds.contains($0) }
-
-        // Add new windows
-        let existingWindowIds = Set(windowOrder)
-        let newWindowIds = currentWindowIds.subtracting(existingWindowIds)
-
-        for windowId in newWindowIds {
-            if newWindowPosition.lowercased() == "top" {
-                windowOrder.insert(windowId, at: 0)
-            } else {
-                windowOrder.append(windowId)
-            }
-        }
     }
 
     private func activateWindowWithId(_ windowId: CGWindowID) -> Bool {
         print("🎯 === ActivateWindowWithId Started ===")
         print("📥 Target window ID: \(windowId)")
 
-        // Get the window info
-        print("📋 Requesting full window list for window lookup...")
+        // Get the window info to find the PID
+        print("📋 Requesting full window list for PID lookup...")
         guard
-            let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
+            let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID)
                 as? [[String: Any]]
         else {
             print("❌ Failed to get window list")
@@ -689,39 +670,28 @@ class BacktickPlusPlusHelper {
         }
         print("✅ Got window list with \(windowList.count) windows")
 
-        var targetPID: pid_t?
-
-        print("🔍 Searching for target window...")
-        for (index, windowInfo) in windowList.enumerated() {
-            if let id = windowInfo[kCGWindowNumber as String] as? CGWindowID,
-                id == windowId,
-                let pid = windowInfo[kCGWindowOwnerPID as String] as? pid_t
-            {
-                targetPID = pid
-                print("✅ Found target window at index \(index) with PID: \(pid)")
-                break
-            }
-        }
-
-        guard let pid = targetPID else {
-            print("❌ Could not find window with ID \(windowId)")
+        guard
+            let targetWindowInfo = windowList.first(where: {
+                ($0[kCGWindowNumber as String] as? CGWindowID) == windowId
+            }),
+            let pid = targetWindowInfo[kCGWindowOwnerPID as String] as? pid_t
+        else {
+            print("❌ Could not find window with ID \(windowId) in CGWindowList")
             return false
         }
+        print("✅ Found target window with PID: \(pid)")
 
         // Get the application
         print("🖥️  Getting NSRunningApplication for PID: \(pid)")
-        let app = NSRunningApplication(processIdentifier: pid)
-        print("📱 App found: \(app?.localizedName ?? "unknown")")
+        guard let app = NSRunningApplication(processIdentifier: pid) else {
+            print("❌ Could not get NSRunningApplication for PID \(pid)")
+            return false
+        }
+        print("📱 App found: \(app.localizedName ?? "unknown")")
 
         // Activate the application first
         print("⚡ Activating application...")
-        if #available(macOS 14.0, *) {
-            let activated = app?.activate()
-            print("📱 App activation result: \(activated == true ? "✅" : "❌")")
-        } else {
-            let activated = app?.activate(options: [.activateIgnoringOtherApps])
-            print("📱 App activation result: \(activated == true ? "✅" : "❌")")
-        }
+        app.activate(options: [.activateIgnoringOtherApps])
 
         // Use Accessibility API to focus the specific window
         print("🔧 Creating AX application reference...")
@@ -732,27 +702,19 @@ class BacktickPlusPlusHelper {
         let result = AXUIElementCopyAttributeValue(
             appRef, kAXWindowsAttribute as CFString, &windowsRef)
 
-        if result == .success,
-            let windows = windowsRef as? [AXUIElement]
-        {
+        if result == .success, let windows = windowsRef as? [AXUIElement] {
             print("✅ Got \(windows.count) windows from Accessibility API")
 
             print("🔍 Searching for target window in AX windows...")
             for (index, window) in windows.enumerated() {
-                var windowIdRef: CFTypeRef?
+                var axWindowId: CGWindowID = 0
                 print("🔍 Checking window \(index + 1)/\(windows.count)...")
 
-                if AXUIElementCopyAttributeValue(
-                    window, kAXIdentifierAttribute as CFString, &windowIdRef) == .success,
-                    let windowIdNum = windowIdRef as? NSNumber,
-                    windowIdNum.uint32Value == windowId
-                {
+                if _AXUIElementGetWindow(window, &axWindowId) == .success, axWindowId == windowId {
                     print("✅ Found matching window! Activating...")
                     // Raise and focus the window
-                    let frontmostResult = AXUIElementSetAttributeValue(
-                        window, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-                    print("🎯 Set frontmost result: \(frontmostResult == .success ? "✅" : "❌")")
-
+                    AXUIElementSetAttributeValue(
+                        window, kAXMainAttribute as CFString, kCFBooleanTrue)
                     let raiseResult = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
                     print("⬆️  Raise action result: \(raiseResult == .success ? "✅" : "❌")")
 
@@ -760,23 +722,7 @@ class BacktickPlusPlusHelper {
                     return true
                 }
             }
-
-            // Fallback: just raise the first window
-            print("⚠️  Target window not found, using fallback...")
-            if let firstWindow = windows.first {
-                print("🔄 Activating first available window as fallback...")
-                let frontmostResult = AXUIElementSetAttributeValue(
-                    firstWindow, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-                print("🎯 Fallback frontmost result: \(frontmostResult == .success ? "✅" : "❌")")
-
-                let raiseResult = AXUIElementPerformAction(firstWindow, kAXRaiseAction as CFString)
-                print("⬆️  Fallback raise result: \(raiseResult == .success ? "✅" : "❌")")
-
-                print("🏁 === ActivateWindowWithId Completed with Fallback ===")
-                return true
-            } else {
-                print("❌ No windows available for fallback")
-            }
+            print("❌ Target window with ID \(windowId) not found in AX windows list.")
         } else {
             print("❌ Failed to get windows from Accessibility API. Result: \(result)")
         }
@@ -785,6 +731,11 @@ class BacktickPlusPlusHelper {
         return false
     }
 }
+
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(
+    _ element: AXUIElement, _ identifier: UnsafeMutablePointer<CGWindowID>
+) -> AXError
 
 // MARK: - Main Entry Point
 
