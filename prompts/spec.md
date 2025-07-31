@@ -1,3 +1,7 @@
+generate an application :
+- minimun number of files for source code (1 for the swift, 1 for the vs code extension)
+ => so generate 2 files only + the "contributes" object of the vscode extension
+
 
 ### **Final Revised Specification for "backtick-plus-plus" (v4)**
 
