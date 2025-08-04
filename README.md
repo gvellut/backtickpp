@@ -1,8 +1,8 @@
 # Backtick++ 
 
-Quick window switching for VS Code on macOS (with shortcuts).
+Quick window switching for VS Code on macOS
 
-The orders of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command).
+In contrast with the *Switch Window...* shortcut (`workbench.action.switchWindow`), the orders of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command but for windows).
 
 ## Architecture
 
@@ -21,6 +21,8 @@ The Swift Helper Process is the one doing the window switching. It handles the g
 - VS Code 1.80.0 or later
 
 ## Building
+
+There is no distribution on the VS Code Extension marketplace so the extension will have to be built.
 
 ### Swift Helper Process
 
@@ -55,15 +57,15 @@ This creates a `.vsix` file that can be installed in VS Code: In the Extensions 
 
 ### Keyboard Shortcuts
 
-- `cmd+alt+shift+f` - Switch forward through windows
-- `cmd+alt+shift+g` - Switch backward through windows  
-- `cmd+alt+shift+d` - Instant switch to second window (to switch between 2 windows quickly)
+- `backtick-plus-plus.switchForward` (by default `cmd+alt+shift+f`) - Switch forward through windows
+- `backtick-plus-plus.switchBackward`(by default `cmd+alt+shift+g`) - Switch backward through windows  
+- `backtick-plus-plus.instantSwitch` (by default `cmd+alt+shift+d`) - Instant switch to second window (to switch between 2 windows quickly)
 
-The *Switch forward* and *Switch backward* can be pressed multiple times while the quick switch listbox is open in VS Code. 
+The *Switch forward* and *Switch backward* can be pressed multiple times while the quick pick listbox is open in VS Code. 
 
 However, *Enter* must be pressed to select the window to switch to: This differs from the "View: Quick Open Previous Recently Used Editor in Group", usually Ctrl-Tab, where an editor is selected when Ctrl is let go (that behaviour doesn't seem to be available for extensions).
 
-*Escape* or focusing outside the listbox will dismiss the quick switch.
+*Escape* or focusing outside the listbox will dismiss the quick pick.
 
 ### Configuration
 
