@@ -1,13 +1,17 @@
 # Backtick++ 
 
-Advanced window switching for VS Code on macOS. This extension provides fast and intuitive window navigation using keyboard shortcuts.
+Quick window switching for VS Code on macOS (with shortcuts).
+
+The order of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command).
 
 ## Architecture
 
 This project consists of two main components:
 
-1. **Swift Helper Process** (`swift-helper/`): A background macOS application that handles window management using Accessibility APIs
+1. **Swift Helper Process** (`swift-helper/`): A background macOS executable that handles window management using Accessibility APIs
 2. **VS Code Extension** (`vscode-extension/`): The user-facing extension that provides UI and commands
+
+The Swift Helper Process is the one doing the window switching. It handles the gathering of the VS Code window titles using the macOS Accessibility API.
 
 ## Prerequisites
 
@@ -22,26 +26,14 @@ This project consists of two main components:
 
 The Swift helper is a background process that manages VS Code windows using macOS Accessibility APIs.
 
-#### Compile for Development
-```bash
-cd swift-helper
-./build.sh
-```
-
-#### Compile for Release (App Bundle)
 ```bash
 cd swift-helper
 ./package.sh
 ```
 
-This creates a `backtick-plus-plus-helper.app` bundle that can be distributed.
+This creates a `Backtick++ Helper.app` bundle that can be distributed. It simply contains a command-line executable (so cannot be launched manually, but will be launched by the VS Code extension).
 
-#### Manual Build Commands
-```bash
-cd swift-helper
-swift build -c release          # Release build
-swift build -c debug            # Debug build
-```
+Copy the `.app` in `/Applications` (this is the default name and will be found by the VS Code extension). Or use the `backtick-plus-plus.helperAppPath` VS Code setting to point at the executable `Contents/MacOS/backtick-plus-plus-helper` inside the `.app` anywhere.
 
 ### VS Code Extension
 
@@ -51,30 +43,62 @@ cd vscode-extension
 npm install
 ```
 
-#### Compile TypeScript
-```bash
-cd vscode-extension
-npm run compile                  # One-time compilation
-npm run watch                    # Watch mode for development
-```
-
 #### Package Extension (VSIX)
 ```bash
 cd vscode-extension
 npx vsce package
 ```
 
-This creates a `.vsix` file that can be installed in VS Code.
+This creates a `.vsix` file that can be installed in VS Code: In the Extensions view, click the ellipsis (...) and select "Install from VSIX...".
+
+## Usage
+
+### Keyboard Shortcuts
+
+- `cmd+alt+shift+f` - Switch forward through windows
+- `cmd+alt+shift+g` - Switch backward through windows  
+- `cmd+alt+shift+d` - Instant switch to second window (to switch between 2 windows quickly)
+
+The *Switch forward* and *Switch backward* can be pressed multiple times while the quick switch listbox is open in VS Code. 
+
+However, *Enter* must be pressed to select the window to switch to: This differs from the "View: Quick Open Previous Recently Used Editor in Group", usually Ctrl-Tab, where an editor is selected when Ctrl is let go (that behaviour doesn't seem to be available for extensions).
+
+*Escape* or focusing outside the listbox will dismiss the quick switch.
+
+### Configuration
+
+The extension provides these settings:
+
+- `backtick-plus-plus.activationMode`: How window activation is handled (if done outside the extension)
+  - `automatic` (default): Current window moves to top of list
+  - `manual`: Preserves current window order
+
+- `backtick-plus-plus.newWindowPosition`: Where new windows appear
+  - `top` (default): New windows at top of list
+  - `bottom`: New windows at bottom of list
+
+- `backtick-plus-plus.helperAppPath`: Full path to the executable of the Backtick++ Helper (usually inside an `.app`)
+
+### First-Time Setup
+
+1. The extension will automatically start the helper process
+2. You'll be prompted to grant Accessibility permissions (used by the Backtick++ Helper to gather the titles of all the VS Code windows)
+3. Click "Request Permission" and approve in System Preferences. VS Code will be the application requesting that permission since it is launching the Helper.
+4. Reload VS Code window when prompted
 
 ## Development & Debugging
 
 ### Swift Helper
 
+The simplest is to use the Swift VS Code extension and launch the executable in debug mode.
+
+Manually:
+
 #### Debug Build
 ```bash
 cd swift-helper
 swift build -c debug
-.build/debug/backtick-plus-plus-helper
+.build/debug/backtick-plus-plus-helpers
 ```
 
 #### Logging
@@ -95,9 +119,23 @@ echo "getStatus" | nc -U /tmp/backtick-plus-plus-helper.sock
 ### VS Code Extension
 
 #### Development Mode
-1. Open the `vscode-extension` folder in VS Code
-2. Press `F5` to launch Extension Development Host
-3. The extension will be loaded in the new VS Code window
+
+1. Create a task that run `npm run compile` and called **Extension: Compile TypeScript** (used by 2.)
+2. Create an `extensionHost` launch configuration. Set the path since the code for the extension is not at the root of the project. For example:
+```json
+ {
+    "name": "Run Extension",
+    "type": "extensionHost",
+    "request": "launch",
+    "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"
+    ],
+    "preLaunchTask": "Extension: Compile TypeScript"
+}
+```
+3. Launch the *Backtick++ Helper* manually (in dev mode, it is not launched by the extension)
+4. Press `F5` to launch Extension Development Host
+5. The extension will be loaded in the new VS Code window
 
 #### Debug Console
 - Use `console.log()` in your TypeScript code
@@ -110,158 +148,3 @@ npm run watch
 ```
 
 After making changes, reload the Extension Development Host window (`Cmd+R`).
-
-## Installation
-
-### Development Installation
-
-1. Build the Swift helper:
-   ```bash
-   cd swift-helper
-   ./build.sh
-   ```
-
-2. Build the VS Code extension:
-   ```bash
-   cd vscode-extension
-   npm install
-   npm run compile
-   ```
-
-3. Install the extension in VS Code:
-   - Open VS Code
-   - Press `Cmd+Shift+P`
-   - Type "Extensions: Install from VSIX"
-   - Select the generated `.vsix` file from `vscode-extension/`
-
-### Production Installation
-
-1. Package the Swift helper as an app bundle:
-   ```bash
-   cd swift-helper
-   ./package.sh
-   ```
-
-2. Build and package the VS Code extension:
-   ```bash
-   cd vscode-extension
-   npm install
-   npm run vscode:prepublish
-   npx vsce package
-   ```
-
-3. Distribute the `.vsix` file and the `.app` bundle
-
-## Usage
-
-### Keyboard Shortcuts
-
-- `Cmd+\`` - Switch forward through windows
-- `Cmd+Shift+\`` - Switch backward through windows  
-- `Cmd+Alt+\`` - Instant switch to second window
-
-### Configuration
-
-The extension provides these settings:
-
-- `backtick-plus-plus.activationMode`: How window activation is handled
-  - `automatic` (default): Current window moves to top of list
-  - `manual`: Preserves current window order
-
-- `backtick-plus-plus.newWindowPosition`: Where new windows appear
-  - `top` (default): New windows at top of list
-  - `bottom`: New windows at bottom of list
-
-### First-Time Setup
-
-1. The extension will automatically start the helper process
-2. You'll be prompted to grant Accessibility permissions
-3. Click "Request Permission" and approve in System Preferences
-4. Reload VS Code window when prompted
-
-## Troubleshooting
-
-### Helper Process Issues
-
-**Helper not starting:**
-```bash
-# Check if binary exists
-ls -la swift-helper/.build/release/backtick-plus-plus-helper
-
-# Test manual launch
-swift-helper/.build/release/backtick-plus-plus-helper
-```
-
-**Permission issues:**
-- Go to System Preferences → Security & Privacy → Privacy → Accessibility
-- Add the helper binary or app bundle
-- Restart VS Code
-
-**Socket issues:**
-```bash
-# Remove stale socket
-rm -f /tmp/backtick-plus-plus-helper.sock
-
-# Check for running processes
-ps aux | grep backtick-plus-plus-helper
-```
-
-### Extension Issues
-
-**TypeScript compilation errors:**
-```bash
-cd vscode-extension
-npm run compile
-```
-
-**Extension not loading:**
-- Check the VS Code Developer Console (`Help → Toggle Developer Tools`)
-- Look for error messages in the Console tab
-
-### Logs
-
-**Swift helper logs:**
-```bash
-log stream --predicate 'subsystem == "com.backtickpp.helper"' --level debug
-```
-
-**VS Code extension logs:**
-- Open Command Palette (`Cmd+Shift+P`)
-- Type "Developer: Reload Window"
-- Check Debug Console for output
-
-## Project Structure
-
-```
-backtickpp/
-├── swift-helper/                 # Swift background process
-│   ├── Package.swift            # Swift Package Manager config
-│   ├── Info.plist              # App bundle configuration
-│   ├── build.sh                # Build script
-│   ├── package.sh              # App bundle packaging script
-│   └── Sources/
-│       └── BacktickPlusPlusHelper/
-│           ├── main.swift       # Entry point
-│           ├── WindowHelper.swift # Core window management
-│           └── SocketServer.swift # IPC server
-├── vscode-extension/            # VS Code extension
-│   ├── package.json            # Extension manifest
-│   ├── tsconfig.json           # TypeScript configuration
-│   └── src/
-│       ├── extension.ts        # Extension entry point
-│       ├── helperProcess.ts    # Helper process client
-│       └── windowSwitcher.ts   # Window switching UI
-├── prompts/                    # Development specifications
-└── README.md                   # This file
-```
-
-## Contributing
-
-1. Make changes in the appropriate subfolder
-2. Test both components together
-3. Update this README if needed
-4. Follow the existing code style
-
-## License
-
-MIT License - see LICENSE file for details.

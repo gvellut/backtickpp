@@ -75,7 +75,7 @@
                 "backtick-plus-plus.helperAppPath": {
                     "type": "string",
                     "default": "",
-                    "description": "Optional: Full path to the Backtick++ Helper .app bundle. If set, the extension will use this path to launch the helper process."
+                    "description": "Optional: Full path to the executable of the Backtick++ Helper. If set, the extension will use this path to launch the helper process."
                 }
             }
         }
