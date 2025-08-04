@@ -1,6 +1,6 @@
 # Backtick++ 
 
-Quick window switching for VS Code on macOS
+Quick window switching for VS Code on macOS.
 
 In contrast with the *Switch Window...* shortcut (`workbench.action.switchWindow`), the orders of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command but for windows).
 
@@ -87,6 +87,10 @@ The extension provides these settings:
 2. You'll be prompted to grant Accessibility permissions (used by the Backtick++ Helper to gather the titles of all the VS Code windows)
 3. Click "Request Permission" and approve in System Preferences. VS Code will be the application requesting that permission since it is launching the Helper.
 4. Reload VS Code window when prompted
+
+### Logs
+
+The logs are available after the extension has launched in a VS Code window in the **Output** panel, **Backtick++** entry in the listbox on the right.
 
 ## Development & Debugging
 
