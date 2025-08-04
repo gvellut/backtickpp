@@ -283,6 +283,7 @@ class WindowSwitcher {
     private currentIndex = 0;
     private helperProcess: HelperProcess;
     private vscode: typeof vscodeAPI;
+    private isPickerOpen = false;
 
     constructor(helperProcess: HelperProcess, vscodeInstance: typeof vscodeAPI) {
         this.helperProcess = helperProcess;
@@ -291,6 +292,12 @@ class WindowSwitcher {
 
     async showSwitcher(direction: 'forward' | 'backward'): Promise<void> {
         try {
+            // If picker is already open, just advance the selection
+            if (this.isPickerOpen && this.quickPick) {
+                this.advanceSelection(direction);
+                return;
+            }
+
             const config = this.vscode.workspace.getConfiguration('backtick-plus-plus');
             const newWindowPosition = config.get<string>('newWindowPosition', 'top');
             const activationMode = config.get<string>('activationMode', 'automatic');
@@ -344,6 +351,7 @@ class WindowSwitcher {
             this.quickPick.dispose();
         }
 
+        this.isPickerOpen = true;
         this.quickPick = this.vscode.window.createQuickPick();
         this.quickPick.placeholder = 'Select a VS Code window';
         this.quickPick.canSelectMany = false;
@@ -374,13 +382,30 @@ class WindowSwitcher {
             }
         });
 
-        // Handle hide
+        // Handle hide/cancel
         this.quickPick.onDidHide(() => {
+            this.isPickerOpen = false;
             this.quickPick?.dispose();
             this.quickPick = null;
         });
 
         this.quickPick.show();
+    }
+
+    private advanceSelection(direction: 'forward' | 'backward'): void {
+        if (!this.quickPick || !this.isPickerOpen || this.windows.length === 0) {
+            return;
+        }
+
+        // Advance the current index
+        if (direction === 'forward') {
+            this.currentIndex = (this.currentIndex + 1) % this.windows.length;
+        } else {
+            this.currentIndex = (this.currentIndex - 1 + this.windows.length) % this.windows.length;
+        }
+
+        // Update the active selection in the QuickPick
+        this.quickPick.activeItems = [this.quickPick.items[this.currentIndex]];
     }
 
     private async activateSelectedWindow(): Promise<void> {
