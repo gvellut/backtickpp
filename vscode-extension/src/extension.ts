@@ -85,8 +85,8 @@ export class HelperProcess {
         });
         // this.helperProcess.unref(); // No longer needed with detached: false
 
-        // Wait a moment for the helper to start
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait for the helper's socket to be created, instead of a fixed time.
+        await this.waitForSocket();
     }
 
     async checkStatusAndPermissions(): Promise<void> {
@@ -131,6 +131,21 @@ export class HelperProcess {
     async activateWindow(id: number): Promise<void> {
         const request = JSON.stringify({ id });
         await this.sendCommand('activateWindow', request);
+    }
+
+    private async waitForSocket(timeoutMs = 5000): Promise<void> {
+        const startTime = Date.now();
+        const pollInterval = 100; // ms
+
+        while (Date.now() - startTime < timeoutMs) {
+            if (fs.existsSync(HelperProcess.SOCKET_PATH)) {
+                console.log('Helper socket found.');
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        throw new Error(`Helper process failed to start within ${timeoutMs}ms.`);
     }
 
     private async killExistingHelpers(): Promise<void> {
@@ -388,39 +403,64 @@ class WindowSwitcher {
 
 let helperProcess: HelperProcess;
 let windowSwitcher: WindowSwitcher;
+let startupPromise: Promise<void> | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Backtick++ extension is now active');
 
-    // Initialize helper process
     helperProcess = new HelperProcess(vscodeAPI);
     windowSwitcher = new WindowSwitcher(helperProcess, vscodeAPI);
 
-    // Register commands
-    const switchForward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchForward', () => {
-        windowSwitcher.showSwitcher('forward');
+    // This function will be called only once to initialize the helper
+    const startHelper = async () => {
+        if (!startupPromise) {
+            startupPromise = (async () => {
+                try {
+                    await helperProcess.start(context.extensionMode === vscodeAPI.ExtensionMode.Development);
+                    await helperProcess.checkStatusAndPermissions();
+                } catch (error: any) {
+                    if (vscodeAPI.window) {
+                        vscodeAPI.window.showErrorMessage(`Failed to start Backtick++ helper: ${error.message}`);
+                    } else {
+                        console.error(`Failed to start Backtick++ helper: ${error.message}`);
+                    }
+                    // Reject the promise to prevent commands from running
+                    throw error;
+                }
+            })();
+        }
+        return startupPromise;
+    };
+
+    // Register commands that await the startup promise
+    const switchForward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchForward', async () => {
+        try {
+            await startHelper();
+            windowSwitcher.showSwitcher('forward');
+        } catch (error) {
+            console.error("Startup failed, command 'switchForward' aborted.");
+        }
     });
 
-    const switchBackward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchBackward', () => {
-        windowSwitcher.showSwitcher('backward');
+    const switchBackward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchBackward', async () => {
+        try {
+            await startHelper();
+            windowSwitcher.showSwitcher('backward');
+        } catch (error) {
+            console.error("Startup failed, command 'switchBackward' aborted.");
+        }
     });
 
-    const instantSwitch = vscodeAPI.commands.registerCommand('backtick-plus-plus.instantSwitch', () => {
-        windowSwitcher.instantSwitch();
+    const instantSwitch = vscodeAPI.commands.registerCommand('backtick-plus-plus.instantSwitch', async () => {
+        try {
+            await startHelper();
+            windowSwitcher.instantSwitch();
+        } catch (error) {
+            console.error("Startup failed, command 'instantSwitch' aborted.");
+        }
     });
 
     context.subscriptions.push(switchForward, switchBackward, instantSwitch);
-
-    // Start helper process
-    helperProcess.start(context.extensionMode == vscodeAPI.ExtensionMode.Development)
-        .then(() => helperProcess.checkStatusAndPermissions())
-        .catch((error: any) => {
-            if (vscodeAPI.window) {
-                vscodeAPI.window.showErrorMessage(`Failed to start Backtick++ helper: ${error.message}`);
-            } else {
-                console.error(`Failed to start Backtick++ helper: ${error.message}`);
-            }
-        });
 }
 
 export function deactivate() {
