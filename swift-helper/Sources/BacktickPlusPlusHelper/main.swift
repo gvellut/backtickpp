@@ -340,7 +340,12 @@ class BacktickPlusPlusHelper {
         print("🎯 === Command Handler Started ===")
         print("📥 Raw command: '\(command)'")
 
-        let parts = command.components(separatedBy: ":")
+        // Clean the command: trim, remove newlines and spaces
+        let cleanedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: " ", with: "")
+
+        let parts = cleanedCommand.components(separatedBy: ":")
         let cmd = parts[0]
         let data = parts.count > 1 ? parts[1...].joined(separator: ":") : ""
 

@@ -62,15 +62,21 @@ export class HelperProcess {
         this.vscode = vscodeInstance;
     }
 
-    async start(): Promise<void> {
+    async start(isDev: boolean): Promise<void> {
+        if (isDev) {
+            // do not initialize : assumes helper is launched externally in debug mode
+            return;
+        }
+
         // Kill any existing helper processes
         await this.killExistingHelpers();
 
         // Find and start the helper binary
-        const helperPath = this.findHelperBinary();
+        const helperPath = this.findHelperBinary(isDev);
         if (!helperPath) {
             throw new Error('Helper binary not found. Please build the Swift helper first.');
         }
+        console.log(`Found helper binary at: ${helperPath}`);
 
         console.log('Spawning helper process...');
         this.helperProcess = spawn(helperPath, [], {
@@ -141,28 +147,40 @@ export class HelperProcess {
         }
     }
 
-    private findHelperBinary(): string | null {
-        const extensionPath = path.dirname(path.dirname(__dirname));
-        const possiblePaths = [
-            // Swift Package Manager builds
-            path.join(extensionPath, 'swift-helper', '.build', 'release', 'backtick-plus-plus-helper'),
-            path.join(extensionPath, 'swift-helper', '.build', 'debug', 'backtick-plus-plus-helper'),
-            path.join(extensionPath, '..', 'swift-helper', '.build', 'release', 'backtick-plus-plus-helper'),
-            path.join(extensionPath, '..', 'swift-helper', '.build', 'debug', 'backtick-plus-plus-helper'),
-            // Makefile builds
-            path.join(extensionPath, 'swift-helper', 'build', 'backtick-plus-plus-helper'),
-            path.join(extensionPath, '..', 'swift-helper', 'build', 'backtick-plus-plus-helper'),
-            // App bundle
-            path.join(extensionPath, 'swift-helper', 'backtick-plus-plus-helper.app', 'Contents', 'MacOS', 'backtick-plus-plus-helper'),
-            path.join(extensionPath, '..', 'swift-helper', 'backtick-plus-plus-helper.app', 'Contents', 'MacOS', 'backtick-plus-plus-helper'),
-        ];
-
-        for (const helperPath of possiblePaths) {
-            if (fs.existsSync(helperPath)) {
-                return helperPath;
+    private findHelperBinary(isDev: boolean): string | null {
+        // 1. Check config option (should be a direct path to the executable)
+        let configPath = '';
+        if (this.vscode && this.vscode.workspace) {
+            const config = this.vscode.workspace.getConfiguration('backtick-plus-plus');
+            configPath = config.get<string>('helperAppPath', '').trim();
+        }
+        if (configPath && fs.existsSync(configPath)) {
+            return configPath;
+        }
+        // 2. Check /Applications for .app bundle executable
+        const appExe = '/Applications/Backtick++ Helper.app/Contents/MacOS/backtick-plus-plus-helper';
+        if (fs.existsSync(appExe)) {
+            return appExe;
+        }
+        // 3. Only check dev locations if isDev
+        if (isDev) {
+            const extensionPath = path.dirname(path.dirname(__dirname));
+            const possiblePaths = [
+                path.join(extensionPath, 'swift-helper', '.build', 'release', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, 'swift-helper', '.build', 'debug', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, '..', 'swift-helper', '.build', 'release', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, '..', 'swift-helper', '.build', 'debug', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, 'swift-helper', 'build', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, '..', 'swift-helper', 'build', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, 'swift-helper', 'backtick-plus-plus-helper.app', 'Contents', 'MacOS', 'backtick-plus-plus-helper'),
+                path.join(extensionPath, '..', 'swift-helper', 'backtick-plus-plus-helper.app', 'Contents', 'MacOS', 'backtick-plus-plus-helper'),
+            ];
+            for (const helperPath of possiblePaths) {
+                if (fs.existsSync(helperPath)) {
+                    return helperPath;
+                }
             }
         }
-
         return null;
     }
 
@@ -202,7 +220,7 @@ export class HelperProcess {
                 // to maintain the async signature of the parent function.
                 const responseBuffer = execSync(shellCommand, {
                     // Set a timeout for the entire operation to prevent indefinite hangs.
-                    timeout: 5000, // 5 seconds
+                    // timeout: 5000, // 5 seconds
                     // Suppress stderr from appearing in the main console to handle errors gracefully.
                     stdio: 'pipe'
                 });
@@ -394,7 +412,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(switchForward, switchBackward, instantSwitch);
 
     // Start helper process
-    helperProcess.start()
+    helperProcess.start(context.extensionMode == vscodeAPI.ExtensionMode.Development)
         .then(() => helperProcess.checkStatusAndPermissions())
         .catch((error: any) => {
             if (vscodeAPI.window) {

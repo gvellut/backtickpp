@@ -4,8 +4,9 @@
     "description": "Advanced window switching for VS Code on macOS",
     "version": "1.0.0",
     "publisher": "backtickpp",
+    "icon": "icon.png",
     "engines": {
-        "vscode": "^1.80.0"
+        "vscode": "^1.89.0"
     },
     "categories": [
         "Other"
@@ -39,15 +40,15 @@
         "keybindings": [
             {
                 "command": "backtick-plus-plus.switchForward",
-                "mac": "cmd+alt+shift+f`"
+                "mac": "cmd+alt+shift+f"
             },
             {
                 "command": "backtick-plus-plus.switchBackward",
-                "mac": "cmd+alt+shift+g`"
+                "mac": "cmd+alt+shift+g"
             },
             {
                 "command": "backtick-plus-plus.instantSwitch",
-                "mac": "cmd+alt+shift+d`"
+                "mac": "cmd+alt+shift+d"
             }
         ],
         "configuration": {
@@ -70,6 +71,11 @@
                     ],
                     "default": "top",
                     "description": "Where new windows appear in the switcher list."
+                },
+                "backtick-plus-plus.helperAppPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional: Full path to the Backtick++ Helper .app bundle. If set, the extension will use this path to launch the helper process."
                 }
             }
         }
@@ -85,6 +91,11 @@
     },
     "devDependencies": {
         "@types/vscode": "^1.89.0",
-        "typescript": "^5.0.0"
+        "typescript": "^5.0.0",
+        "@types/node": "^20.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/yourusername/backtick-plus-plus.git"
     }
 }
