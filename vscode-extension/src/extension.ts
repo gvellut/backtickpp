@@ -62,13 +62,19 @@ export class HelperProcess {
         this.vscode = vscodeInstance;
     }
 
-    async start(isDev: boolean): Promise<void> {
-        if (isDev) {
-            // do not initialize : assumes helper is launched externally in debug mode
-            return;
+    async ensureRunning(isDev: boolean): Promise<void> {
+        // 1. Check if the helper is already running by pinging it.
+        try {
+            await this.sendCommand('ping', '');
+            log('Helper process is already running.');
+            return; // If ping succeeds, do nothing else.
+        } catch (error) {
+            log('Helper process not responding to ping, attempting to start it...');
+            // If ping fails, proceed to start the process.
         }
 
-        // Kill any existing helper processes
+        // 2. If not running, start it.
+        // Kill any existing STALE helper processes or sockets
         await this.killExistingHelpers();
 
         // Find and start the helper binary
@@ -76,20 +82,34 @@ export class HelperProcess {
         if (!helperPath) {
             throw new Error('Helper binary not found. Please build the Swift helper first.');
         }
-        console.log(`Found helper binary at: ${helperPath}`);
+        log(`Found helper binary at: ${helperPath}`);
 
-        console.log('Spawning helper process...');
+        log('Spawning helper process...');
         this.helperProcess = spawn(helperPath, [], {
-            detached: false, // Tie helper lifecycle to the extension
+            detached: false,
             stdio: 'ignore'
         });
-        // this.helperProcess.unref(); // No longer needed with detached: false
 
-        // Wait for the helper's socket to be created, instead of a fixed time.
+        // Wait for the helper's socket to be created.
         await this.waitForSocket();
+        log('Helper process started successfully.');
     }
 
-    async checkStatusAndPermissions(): Promise<void> {
+    async registerClient(): Promise<void> {
+        await this.sendCommand('registerClient', '');
+        log('Successfully registered this window as a client.');
+    }
+
+    async unregisterClient(): Promise<void> {
+        try {
+            await this.sendCommand('unregisterClient', '');
+            log('Successfully unregistered this window as a client.');
+        } catch (error) {
+            log(`Could not unregister client, helper may already be down: ${error}`);
+        }
+    }
+
+    async checkStatusAndPermissions(): Promise<boolean> {
         // Check if helper is responding
         const status = await this.getStatus();
         if (!status.hasAccessibilityPermission) {
@@ -98,6 +118,7 @@ export class HelperProcess {
                 await this.requestPermission();
             }
         }
+        return status.hasAccessibilityPermission;
     }
 
     async shutdown(): Promise<void> {
@@ -231,6 +252,7 @@ export class HelperProcess {
             const shellCommand = `echo '${sanitizedMessage}' | nc -U '${socketPath}'`;
 
             try {
+                log("send command to helper: " + shellCommand);
                 // `execSync` blocks until the shell command finishes. We wrap it in a Promise
                 // to maintain the async signature of the parent function.
                 const responseBuffer = execSync(shellCommand, {
@@ -267,7 +289,7 @@ export class HelperProcess {
                 'Cancel'
             );
         } else {
-            console.log('Backtick++ needs Accessibility permissions. Please grant them in System Settings.');
+            log('Backtick++ needs Accessibility permissions. Please grant them in System Settings.');
             // For a CLI, we might not be able to programmatically ask.
             // Let's assume 'Request Permission' for CLI testing purposes.
             return 'Request Permission';
@@ -429,25 +451,43 @@ class WindowSwitcher {
 let helperProcess: HelperProcess;
 let windowSwitcher: WindowSwitcher;
 let startupPromise: Promise<void> | null = null;
+let hasAccessibilityPermission = false;
+
+let outputChannel: { appendLine: (msg: string) => void };
+if (vscodeAPI.window && vscodeAPI.window.createOutputChannel) {
+    outputChannel = vscodeAPI.window.createOutputChannel('Backtick++');
+} else {
+    outputChannel = { appendLine: (msg: string) => console.log(msg) };
+}
+function log(msg: string) {
+    const now = new Date().toISOString();
+    outputChannel.appendLine(`[${now}] ${msg}`);
+}
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Backtick++ extension is now active');
+    log('Backtick++ extension is now active');
 
     helperProcess = new HelperProcess(vscodeAPI);
     windowSwitcher = new WindowSwitcher(helperProcess, vscodeAPI);
 
     // This function will be called only once to initialize the helper
-    const startHelper = async () => {
+    const startHelper = () => {
         if (!startupPromise) {
             startupPromise = (async () => {
                 try {
-                    await helperProcess.start(context.extensionMode === vscodeAPI.ExtensionMode.Development);
-                    await helperProcess.checkStatusAndPermissions();
+                    // Ensure the helper process is running and responsive
+                    await helperProcess.ensureRunning(context.extensionMode === vscodeAPI.ExtensionMode.Development);
+
+                    // Register this window as a client
+                    await helperProcess.registerClient();
+
+                    // Check permissions
+                    hasAccessibilityPermission = await helperProcess.checkStatusAndPermissions();
                 } catch (error: any) {
                     if (vscodeAPI.window) {
                         vscodeAPI.window.showErrorMessage(`Failed to start Backtick++ helper: ${error.message}`);
                     } else {
-                        console.error(`Failed to start Backtick++ helper: ${error.message}`);
+                        log(`Failed to start Backtick++ helper: ${error.message}`);
                     }
                     // Reject the promise to prevent commands from running
                     throw error;
@@ -460,28 +500,40 @@ export function activate(context: vscode.ExtensionContext) {
     // Register commands that await the startup promise
     const switchForward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchForward', async () => {
         try {
+            const isFirstTime = !startupPromise;
             await startHelper();
-            windowSwitcher.showSwitcher('forward');
+            if (!isFirstTime || hasAccessibilityPermission) {
+                windowSwitcher.showSwitcher('forward');
+            }
+            // If first time and no permission, do nothing (no error message)
         } catch (error) {
-            console.error("Startup failed, command 'switchForward' aborted.");
+            log("Startup failed, command 'switchForward' aborted.");
         }
     });
 
     const switchBackward = vscodeAPI.commands.registerCommand('backtick-plus-plus.switchBackward', async () => {
         try {
+            const isFirstTime = !startupPromise;
             await startHelper();
-            windowSwitcher.showSwitcher('backward');
+            if (!isFirstTime || hasAccessibilityPermission) {
+                windowSwitcher.showSwitcher('backward');
+            }
+            // If first time and no permission, do nothing (no error message)
         } catch (error) {
-            console.error("Startup failed, command 'switchBackward' aborted.");
+            log("Startup failed, command 'switchBackward' aborted.");
         }
     });
 
     const instantSwitch = vscodeAPI.commands.registerCommand('backtick-plus-plus.instantSwitch', async () => {
         try {
+            const isFirstTime = !startupPromise;
             await startHelper();
-            windowSwitcher.instantSwitch();
+            if (!isFirstTime || hasAccessibilityPermission) {
+                windowSwitcher.instantSwitch();
+            }
+            // If first time and no permission, do nothing (no error message)
         } catch (error) {
-            console.error("Startup failed, command 'instantSwitch' aborted.");
+            log("Startup failed, command 'instantSwitch' aborted.");
         }
     });
 
@@ -489,8 +541,10 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-    console.log('Backtick++ extension is being deactivated');
+    log('Backtick++ extension is being deactivated');
     if (helperProcess) {
-        helperProcess.shutdown();
+        // Instead of shutting down, just unregister this client.
+        // The helper will shut itself down if this is the last client.
+        helperProcess.unregisterClient();
     }
 }

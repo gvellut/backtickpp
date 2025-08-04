@@ -25,11 +25,14 @@ struct ActivateWindowRequest: Codable {
 
 // MARK: - Helper Application
 
-class BacktickPlusPlusHelper {
+class BacktickPlusPlusHelper: @unchecked Sendable {
     private static let socketPath = "/tmp/backtick-plus-plus-helper.sock"
     private var server: CFSocket?
     private var runLoop: CFRunLoop?
     private var windowOrder: [CGWindowID] = []
+    private var clientCount = 0
+    private var lastKnownVscodePid: pid_t?
+    private let commandQueue = DispatchQueue(label: "com.backtick.commandQueue")  // Serial queue for state safety
 
     func start() {
         print("=== Backtick++ Helper Starting ===")
@@ -274,7 +277,7 @@ class BacktickPlusPlusHelper {
         print("📡 Got accepted client socket: \(clientSocket)")
 
         // Process each connection on a background queue to handle multiple connections concurrently
-        DispatchQueue.global(qos: .userInitiated).async {
+        commandQueue.async {
             self.processClientConnection(clientSocket)
         }
 
@@ -312,7 +315,10 @@ class BacktickPlusPlusHelper {
             let command = String(bytes: buffer[0..<bytesRead], encoding: .utf8) ?? ""
             print("📝 Command received: '\(command)'")
             print("🔄 Processing command...")
+
+            // Commands are already on the serial commandQueue, so we can process directly.
             let response = handleCommand(command)
+
             print("📋 Command processed. Response: '\(response.prefix(100))...' (truncated)")
 
             print("📤 Sending response to client...")
@@ -354,6 +360,15 @@ class BacktickPlusPlusHelper {
 
         let response: String
         switch cmd {
+        case "ping":
+            print("❤️ Handling ping command")
+            response = "OK:pong"
+        case "registerClient":
+            print("👋 Handling registerClient command")
+            response = handleRegisterClient()
+        case "unregisterClient":
+            print("🚪 Handling unregisterClient command")
+            response = handleUnregisterClient()
         case "getStatus":
             print("🏥 Handling getStatus command")
             response = handleGetStatus()
@@ -380,10 +395,31 @@ class BacktickPlusPlusHelper {
         return response
     }
 
+    private func handleRegisterClient() -> String {
+        clientCount += 1
+        print("📈 Client registered. Total clients: \(clientCount)")
+        return "OK:"
+    }
+
+    private func handleUnregisterClient() -> String {
+        clientCount -= 1
+        print("📉 Client unregistered. Total clients: \(clientCount)")
+
+        if clientCount <= 0 {
+            print("🚮 Last client disconnected. Initiating shutdown.")
+            // Schedule shutdown on main queue after allowing response to be sent
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                print("👋 Exiting application...")
+                exit(0)
+            }
+        }
+        return "OK:"
+    }
+
     private func handleGetStatus() -> String {
         print("🏥 === GetStatus Handler Started ===")
         print("🔍 Checking accessibility permission...")
-        let hasPermission = AXIsProcessTrustedWithOptions(nil)
+        let hasPermission = checkAccessibilityPermission()
         print("🔐 Accessibility permission: \(hasPermission ? "✅ GRANTED" : "❌ DENIED")")
 
         let response = StatusResponse(hasAccessibilityPermission: hasPermission)
@@ -401,29 +437,92 @@ class BacktickPlusPlusHelper {
         }
     }
 
-    private func handleRequestPermission() -> String {
-        print("🔐 === RequestPermission Handler Started ===")
+    private func checkAccessibilityPermission() -> Bool {
+        return AXIsProcessTrustedWithOptions(nil)
+    }
 
-        // Check if we're running as a bundled app
+    private func triggerPermissionPromptIfPossible() {
         let bundle = Bundle.main
         print("📦 Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
 
         if bundle.bundleIdentifier != nil {
             print("🎯 Running as bundled app - triggering permission prompt")
-            // Trigger permission prompt
             AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
             print("✅ Permission prompt triggered")
         } else {
             print("⚠️  Not running as bundled app - cannot trigger permission prompt")
         }
+    }
+
+    private func handleRequestPermission() -> String {
+        print("🔐 === RequestPermission Handler Started ===")
+
+        triggerPermissionPromptIfPossible()
 
         print("🏁 === RequestPermission Handler Completed ===")
         return "OK:"
     }
 
+    private func checkVscodeSession() {
+        print("🔎 === Checking VS Code Session ===")
+        let vscodeBundleId = "com.microsoft.VSCode"
+        guard
+            let currentVscodeApp = NSRunningApplication.runningApplications(
+                withBundleIdentifier: vscodeBundleId
+            ).first
+        else {
+            // VS Code is not running. If we had a session, it's over.
+            if lastKnownVscodePid != nil {
+                print("🔴 VS Code is no longer running. Resetting state.")
+                resetState()
+                lastKnownVscodePid = nil  // Clear the PID
+            }
+            return
+        }
+
+        let currentPid = currentVscodeApp.processIdentifier
+        print("ℹ️ Current VS Code PID: \(currentPid)")
+
+        if lastKnownVscodePid == nil {
+            // This is the first time we've seen VS Code in this helper's lifetime.
+            print("✨ First run for this helper instance. Setting initial PID.")
+            lastKnownVscodePid = currentPid
+        } else if lastKnownVscodePid != currentPid {
+            // The PID has changed, which means VS Code was restarted.
+            print(
+                "🔄 VS Code has restarted (PID changed from \(lastKnownVscodePid!) to \(currentPid)). Resetting state."
+            )
+            resetState()
+            lastKnownVscodePid = currentPid
+        } else {
+            print("✅ VS Code session is consistent (PID: \(currentPid)).")
+        }
+        print("🏁 === Session Check Complete ===")
+    }
+
+    private func resetState() {
+        print("🧹 Resetting helper state...")
+        windowOrder = []
+        clientCount = 0  // Also reset client count as it's tied to a VS Code session
+        print("✅ Helper state (window order and client count) has been reset.")
+    }
+
     private func handleGetWindows(_ data: String) -> String {
         print("🪟 === GetWindows Handler Started ===")
+
+        // --- NEW: Check for new VS Code session ---
+        checkVscodeSession()
+
         print("📥 Request data: '\(data)'")
+
+        // Check accessibility permission first
+        print("🔍 Checking accessibility permission...")
+        if !checkAccessibilityPermission() {
+            print("❌ Accessibility permission not granted")
+            print("🏁 === GetWindows Handler Failed ===")
+            return "ERROR:Accessibility permission not granted"
+        }
+        print("✅ Accessibility permission granted")
 
         do {
             print("🔄 Decoding request JSON...")
