@@ -1,7 +1,7 @@
 {
     "name": "backtick-plus-plus",
     "displayName": "Backtick++",
-    "description": "Advanced window switching for VS Code on macOS",
+    "description": "Quick window switching for VS Code on macOS",
     "version": "1.0.0",
     "publisher": "backtickpp",
     "icon": "icon.png",

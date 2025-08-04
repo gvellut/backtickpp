@@ -2,7 +2,7 @@
 
 Quick window switching for VS Code on macOS (with shortcuts).
 
-The order of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command).
+The orders of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command).
 
 ## Architecture
 
