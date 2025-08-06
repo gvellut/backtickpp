@@ -2,7 +2,7 @@
 
 Quick window switching for VS Code on macOS.
 
-In contrast with the *Switch Window...* shortcut (`workbench.action.switchWindow`), the orders of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command but for windows).
+In contrast with the *Switch Window...* shortcut (`workbench.action.switchWindow`) or the standard macOS shortcut `` Cmd-` ``, the orders of the windows will be updated and recalled (similar to the "View: Quick Open Previous Recently Used Editor in Group" command but for windows) so switching between a few windows (out of all the VS Code windows) becomes easier.
 
 ## Architecture
 
